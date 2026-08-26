@@ -1,36 +1,59 @@
-This is a [Next.js](https://nextjs.org) project bootstrapped with [`create-next-app`](https://nextjs.org/docs/app/api-reference/cli/create-next-app).
+# Optimizer
 
-## Getting Started
+The prompt optimizer, extracted from `StudyMyPlays/be-promptful` so it can be
+developed on its own. Paste a rough request, pick the agent or workspace it is
+for, and get back a prompt written the way that product expects one.
 
-First, run the development server:
+Two families of output live behind one surface, which is why the modes are
+grouped in the picker:
+
+- **Task modes** (Claude Co-Work, Perplexity Comet) return a single clean prompt
+  to paste into a chat.
+- **Workspace modes** (Claude Projects, Gemini Gems, ChatGPT Projects) return the
+  standing instructions that sit behind a saved workspace, and take an optional
+  description of the knowledge base alongside the request.
+
+## Running it
 
 ```bash
+npm install
+cp .env.example .env.local   # then set OPENROUTER_API_KEY
 npm run dev
-# or
-yarn dev
-# or
-pnpm dev
-# or
-bun dev
 ```
 
-Open [http://localhost:3000](http://localhost:3000) with your browser to see the result.
+Without `OPENROUTER_API_KEY` the app renders and the route answers 503, so the
+UI reports that optimization is not configured rather than failing at the model
+provider.
 
-You can start editing the page by modifying `app/page.tsx`. The page auto-updates as you edit the file.
+## What is here
 
-This project uses [`next/font`](https://nextjs.org/docs/app/building-your-application/optimizing/fonts) to automatically optimize and load [Geist](https://vercel.com/font), a new font family for Vercel.
+| Path | What it is |
+| --- | --- |
+| `src/lib/optimizer/optimizer.ts` | The whole feature definition: mode configs, system prompts, per-mode accents, input ceilings, the allow-list of models. |
+| `src/app/api/optimize/route.ts` | The server route. Validates the body, rate limits, calls OpenRouter, strips code fences off the reply. |
+| `src/components/optimizer/` | `prompt-optimizer` (state), `search-input` (the composer and mode picker), `prompt-result` (structure-aware rendering of the output). |
+| `src/lib/openrouter.ts` | One call to OpenRouter, with the upstream response reduced to "text, or the status that went wrong". |
+| `src/lib/rate-limit.ts`, `src/lib/api-response.ts` | In-process token buckets and the shared `{ error }` failure shapes. |
+| `src/components/ui/` | The five shadcn components the optimizer uses: button, select, skeleton, spinner, empty. |
 
-## Learn More
+## Differences from the app it came from
 
-To learn more about Next.js, take a look at the following resources:
+**There is no auth gate.** In `be-promptful` this route required a signed-in
+user — the OpenRouter key is billable, and the session id was both the
+authorization and the rate-limit key. This repo has no accounts, so the caller
+is identified by IP and the limit stays at 20 per minute.
 
-- [Next.js Documentation](https://nextjs.org/docs) - learn about Next.js features and API.
-- [Learn Next.js](https://nextjs.org/learn) - an interactive Next.js tutorial.
+That is weaker on purpose. An IP is shared by everyone behind a NAT and rotated
+freely by anyone who wants more than 20 calls a minute, so **before deploying
+this anywhere the public can reach it, put an account check back in front of the
+route** — `unauthorized()` is still in `src/lib/api-response.ts` for that, and
+the rate-limit key should go back to the user id.
 
-You can check out [the Next.js GitHub repository](https://github.com/vercel/next.js) - your feedback and contributions are welcome!
+**The rate limit is per-process.** `src/lib/rate-limit.ts` holds its buckets in
+memory, so on a platform that runs several instances each one counts
+separately, and a redeploy resets the count. It is a brake on accidental
+hammering, not a quota.
 
-## Deploy on Vercel
-
-The easiest way to deploy your Next.js app is to use the [Vercel Platform](https://vercel.com/new?utm_medium=default-template&filter=next.js&utm_source=create-next-app&utm_campaign=create-next-app-readme) from the creators of Next.js.
-
-Check out our [Next.js deployment documentation](https://nextjs.org/docs/app/building-your-application/deploying) for more details.
+**Entrance animations work.** The components use `animate-in` /
+`slide-in-from-*`; the original had `tw-animate-css` installed but never
+imported, so those classes were inert there. `src/app/globals.css` imports it.
