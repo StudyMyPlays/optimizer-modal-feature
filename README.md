@@ -30,8 +30,10 @@ provider.
 | Path | What it is |
 | --- | --- |
 | `src/lib/optimizer/optimizer.ts` | The whole feature definition: mode configs, system prompts, per-mode accents, input ceilings, the allow-list of models. |
-| `src/app/api/optimize/route.ts` | The server route. Validates the body, rate limits, calls OpenRouter, strips code fences off the reply. |
-| `src/components/optimizer/` | `prompt-optimizer` (state), `search-input` (the composer and mode picker), `prompt-result` (structure-aware rendering of the output). |
+| `src/lib/optimizer/score.ts` | The quality-score judge: a mode-agnostic 0-100 rubric (specificity/completeness/clarity/structure), run against both the raw input and every draft. Best-effort — returns `null` rather than throwing. |
+| `src/lib/optimizer/refine.ts` | `runOptimize()`, the orchestrator: the generate call, the always-on baseline/draft scoring, and — when `deepOptimize` is requested — the two-pass critique-and-revise loop, using each judge's `issues` as the next revision's feedback. |
+| `src/app/api/optimize/route.ts` | The server route. Validates the body, rate limits, calls `runOptimize()`, returns its result as-is. |
+| `src/components/optimizer/` | `prompt-optimizer` (state, incl. the client-side `isPro` demo toggle), `search-input` (the composer, mode picker, and Deep Optimize toggle), `prompt-result` (structure-aware rendering of the output), `quality-score` (score/delta pills, Pro-gated breakdown), `before-after-diff` (Pro-gated word diff between the pre- and post-refinement drafts). |
 | `src/lib/openrouter.ts` | One call to OpenRouter, with the upstream response reduced to "text, or the status that went wrong". |
 | `src/lib/rate-limit.ts`, `src/lib/api-response.ts` | In-process token buckets and the shared `{ error }` failure shapes. |
 | `src/components/ui/` | The five shadcn components the optimizer uses: button, select, skeleton, spinner, empty. |
@@ -53,6 +55,12 @@ the rate-limit key should go back to the user id.
 memory, so on a platform that runs several instances each one counts
 separately, and a redeploy resets the count. It is a brake on accidental
 hammering, not a quota.
+
+**Deep Optimize has its own, tighter limit.** Every request scores the raw
+input and the draft (2 extra calls); opting into Deep Optimize adds a
+two-pass critique-and-revise loop (up to 4 more), so a `deepOptimize: true`
+request can cost up to 7 calls instead of 1. Those requests are capped at 5
+per minute per IP, on top of — not instead of — the base 20/minute limit.
 
 **Entrance animations work.** The components use `animate-in` /
 `slide-in-from-*`; the original had `tw-animate-css` installed but never

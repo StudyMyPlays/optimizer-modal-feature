@@ -1,14 +1,12 @@
 import { NextRequest, NextResponse } from 'next/server'
 import {
-  MODES,
   ALLOWED_MODELS,
   MAX_CTX_CHARS,
   MAX_RAW_CHARS,
-  buildUserContent,
   isOptimizerMode,
 } from '@/lib/optimizer/optimizer'
+import { runOptimize } from '@/lib/optimizer/refine'
 import { checkRateLimit, getClientIp } from '@/lib/rate-limit'
-import { callOpenRouter, openRouterErrorResponse, stripFences } from '@/lib/openrouter'
 import {
   invalidBody,
   jsonError,
@@ -16,11 +14,16 @@ import {
   rateLimited,
 } from '@/lib/api-response'
 export const runtime = 'nodejs'
-/** Subject of the sentence in any upstream-failure message from this route. */
-const FEATURE = 'The optimizer'
+// A deep-optimize request runs up to 7 sequential/parallel LLM calls; give it
+// real headroom instead of the platform's default short function timeout.
+export const maxDuration = 60
 const DEFAULT_MODEL = process.env.OPENROUTER_MODEL || 'anthropic/claude-haiku-4.5'
 const RATE_LIMIT = 20
 const RATE_WINDOW_MS = 60_000
+// Deep-optimize costs several times what a normal request does, so it gets
+// its own tighter ceiling on top of the base one — both checks apply.
+const DEEP_RATE_LIMIT = 5
+const DEEP_RATE_WINDOW_MS = 60_000
 /**
  * In the app this was extracted from, the gate on this route was a signed-in
  * user: the OpenRouter key is billable, and the session id was both the
@@ -39,13 +42,14 @@ export async function POST(req: NextRequest) {
     raw?: string
     ctx?: string
     model?: string
+    deepOptimize?: boolean
   }
   try {
     body = await req.json()
   } catch {
     return invalidBody()
   }
-  const { mode, raw, ctx, model } = body
+  const { mode, raw, ctx, model, deepOptimize } = body
   if (!mode || !isOptimizerMode(mode)) {
     return jsonError('Unknown mode.', 400)
   }
@@ -68,31 +72,29 @@ export async function POST(req: NextRequest) {
   if (!key) {
     return notConfigured('Prompt optimization isn’t configured on this server.')
   }
-  if (!checkRateLimit(`optimize:${getClientIp(req)}`, RATE_LIMIT, RATE_WINDOW_MS)) {
+  const ip = getClientIp(req)
+  if (!checkRateLimit(`optimize:${ip}`, RATE_LIMIT, RATE_WINDOW_MS)) {
+    return rateLimited()
+  }
+  if (deepOptimize && !checkRateLimit(`optimize:deep:${ip}`, DEEP_RATE_LIMIT, DEEP_RATE_WINDOW_MS)) {
     return rateLimited()
   }
   const requestedModel = model?.trim()
   if (requestedModel && !ALLOWED_MODELS.has(requestedModel)) {
     return jsonError('Unsupported model.', 400)
   }
-  const cfg = MODES[mode]
-  const userContent = buildUserContent(raw, ctx, cfg.contextLabel)
   try {
-    const result = await callOpenRouter({
+    const outcome = await runOptimize({
       key,
+      mode,
+      raw,
+      ctx,
       model: requestedModel || DEFAULT_MODEL,
-      // Per-mode: a workspace instruction block runs several times longer than
-      // a one-off task prompt, and truncating one mid-section ships a broken
-      // artifact rather than a short one.
-      maxTokens: cfg.maxTokens,
+      deepOptimize: !!deepOptimize,
       origin: req.headers.get('origin'),
-      messages: [
-        { role: 'system', content: cfg.system },
-        { role: 'user', content: userContent },
-      ],
     })
-    if (!result.ok) return openRouterErrorResponse(result, FEATURE)
-    return NextResponse.json({ text: stripFences(result.text) })
+    if (!outcome.ok) return outcome.response
+    return NextResponse.json(outcome.result)
   } catch (err) {
     console.error('Optimize request failed:', err)
     return jsonError('The optimizer could not reach the model provider. Try again.', 502)
