@@ -2,7 +2,7 @@
 import { useState, useEffect } from 'react'
 import { useReducedMotion } from 'framer-motion'
 import Image from 'next/image'
-import { ArrowUp, ChevronDown, Paperclip } from 'lucide-react'
+import { ArrowUp, ChevronDown, Paperclip, Sparkles } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Spinner } from '@/components/ui/spinner'
 import {
@@ -26,6 +26,7 @@ export interface OptimizeInput {
   raw: string
   mode: OptimizerMode
   ctx?: string
+  deepOptimize?: boolean
 }
 interface SearchInputProps {
   onSubmit?: (input: OptimizeInput) => void
@@ -43,6 +44,7 @@ export function SearchInput({
   const [ctx, setCtx] = useState('')
   const [showCtx, setShowCtx] = useState(false)
   const [showExamples, setShowExamples] = useState(false)
+  const [deepOptimize, setDeepOptimize] = useState(false)
   const [isFocused, setIsFocused] = useState(false)
   const [typed, setTyped] = useState('')
   const [typingDone, setTypingDone] = useState(false)
@@ -83,6 +85,7 @@ export function SearchInput({
       raw: trimmed,
       mode,
       ...(supportsContext && trimmedCtx ? { ctx: trimmedCtx } : {}),
+      ...(deepOptimize ? { deepOptimize: true } : {}),
     })
   }
   const canSubmit = !!value.trim() && !isLoading
@@ -185,6 +188,20 @@ export function SearchInput({
                   )}
                 </button>
               )}
+              <button
+                type="button"
+                onClick={() => setDeepOptimize((d) => !d)}
+                aria-pressed={deepOptimize}
+                title="Run 2 extra critique-and-rewrite passes before returning a result. Slower, higher quality."
+                className={`flex items-center gap-1.5 rounded-lg px-2 py-1.5 text-xs font-medium transition-colors ${
+                  deepOptimize
+                    ? 'bg-primary/10 text-primary'
+                    : 'text-muted-foreground hover:text-foreground'
+                }`}
+              >
+                <Sparkles className="h-3.5 w-3.5" />
+                Deep optimize
+              </button>
             </div>
             <div className="flex items-center gap-3">
               <Select

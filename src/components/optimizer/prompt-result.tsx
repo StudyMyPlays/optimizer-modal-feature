@@ -14,12 +14,20 @@ import {
 import { cn } from '@/lib/utils'
 import { copyToClipboard } from '@/lib/clipboard'
 import { MODES, MODE_ACCENT, type OptimizerMode } from '@/lib/optimizer/optimizer'
+import { QualityScore } from '@/components/optimizer/quality-score'
+import { BeforeAfterDiff } from '@/components/optimizer/before-after-diff'
+import type { QualityScore as QualityScoreValue } from '@/lib/optimizer/score'
+import type { OptimizeResult } from '@/lib/optimizer/refine'
 export type PromptStatus = 'idle' | 'loading' | 'success' | 'error'
 interface PromptResultProps {
   status: PromptStatus
   mode: OptimizerMode
   prompt?: string
   result?: string
+  score?: QualityScoreValue | null
+  baseline?: QualityScoreValue | null
+  refinement?: OptimizeResult['refinement']
+  isPro?: boolean
   error?: string
   onRetry?: () => void
   onReset?: () => void
@@ -123,6 +131,10 @@ export function PromptResult({
   mode,
   prompt,
   result,
+  score,
+  baseline,
+  refinement,
+  isPro = false,
   error,
   onRetry,
   onReset,
@@ -236,7 +248,13 @@ export function PromptResult({
                 Request: {prompt}
               </p>
             )}
+            {(score || baseline) && (
+              <QualityScore score={score ?? null} baseline={baseline ?? null} isPro={isPro} refinement={refinement} />
+            )}
             <OutputBlock text={result} mode={mode} />
+            {refinement && (
+              <BeforeAfterDiff before={refinement.draft0} after={result} isPro={isPro} />
+            )}
             <p className="mt-4 text-xs font-light leading-relaxed text-muted-foreground/80">
               {cfg.tip}
             </p>
